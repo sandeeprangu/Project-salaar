@@ -9,11 +9,15 @@ on:
       - 'main'
   workflow_dispatch:
 
+env:
+  # UPDATE THIS: Set the path to your solution file (.sln) relative to the repository root
+  SOLUTION_PATH: 'YourSolutionName.sln' 
+
 jobs:
   build:
     runs-on: windows-latest
     permissions:
-      contents: read #This is required for actions/checkout
+      contents: read # This is required for actions/checkout
 
     steps:
       - uses: actions/checkout@v4
@@ -24,24 +28,27 @@ jobs:
       - name: Setup NuGet
         uses: NuGet/setup-nuget@v1.0.5
 
+      # Updated to target the specific solution file
       - name: Restore NuGet packages
-        run: nuget restore
+        run: nuget restore ${{ env.SOLUTION_PATH }}
 
+      # Updated to target the solution file and use a safe workspace path for publishing
       - name: Publish to folder
-        run: msbuild /nologo /verbosity:m /t:Build /t:pipelinePreDeployCopyAllFilesToOneFolder /p:_PackageTempDir="\published\"
+        run: msbuild ${{ env.SOLUTION_PATH }} /nologo /verbosity:m /t:Build /t:pipelinePreDeployCopyAllFilesToOneFolder /p:_PackageTempDir="${{ github.workspace }}\published\"
 
+      # Updated path to match the workspace variable above
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
           name: ASP-app
-          path: '/published/**'
+          path: '${{ github.workspace }}\published\**'
 
   deploy:
     runs-on: windows-latest
     needs: build
     permissions:
-      id-token: write #This is required for requesting the JWT
-      contents: read #This is required for actions/checkout
+      id-token: write # This is required for requesting the JWT
+      contents: read # This is required for actions/checkout
 
     steps:
       - name: Download artifact from build job
@@ -63,4 +70,3 @@ jobs:
           app-name: 'SR'
           slot-name: 'Production'
           package: .
-          
