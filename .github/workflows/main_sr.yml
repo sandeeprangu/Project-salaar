@@ -1,62 +1,69 @@
-# Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
-# More GitHub Actions for Azure: https://github.com/Azure/actions
 
-name: Build and deploy ASP app to Azure Web App - FF
+name: Deploy portfolio to Azure Web App - FF
 
 on:
   push:
     branches:
-      - 'main'
+      - main
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: windows-latest
+
     permissions:
-      contents: read # This is required for actions/checkout
+      contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Setup MSBuild path
-        uses: microsoft/setup-msbuild@v1.0.2
-
-      - name: Setup NuGet
-        uses: NuGet/setup-nuget@v1.0.5
-
-      - name: Restore NuGet packages
+      - name: Verify website files
         shell: pwsh
         run: |
-          $sln = Get-ChildItem -Recurse -Filter *.sln | Select-Object -First 1
-          if (-not $sln) { throw "No .sln file found in repository!" }
-          Write-Host "Found solution: $($sln.FullName)"
-          nuget restore $sln.FullName
+          $required = @(
+            "index.html",
+            "web.config",
+            "assets"
+          )
 
-      - name: Publish to folder
+          foreach ($item in $required) {
+            if (-not (Test-Path $item)) {
+              throw "Required website file or folder not found: $item"
+            }
+          }
+
+          Write-Host "Website files verified successfully."
+
+      - name: Create deployment package
         shell: pwsh
         run: |
-          $sln = Get-ChildItem -Recurse -Filter *.sln | Select-Object -First 1
-          msbuild $sln.FullName /nologo /verbosity:m /t:Build /t:pipelinePreDeployCopyAllFilesToOneFolder /p:_PackageTempDir="$env:GITHUB_WORKSPACE\_published"
+          Compress-Archive `
+            -Path index.html, web.config, assets `
+            -DestinationPath site.zip `
+            -Force
 
-      - name: Upload artifact for deployment job
+      - name: Upload website artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ASP-app
-          path: _published/**
+          name: website-package
+          path: site.zip
+          if-no-files-found: error
 
   deploy:
     runs-on: windows-latest
     needs: build
+
     permissions:
-      id-token: write # This is required for requesting the JWT
-      contents: read # This is required for actions/checkout
+      contents: read
+      id-token: write
 
     steps:
-      - name: Download artifact from build job
+      - name: Download website artifact
         uses: actions/download-artifact@v4
         with:
-          name: ASP-app
-          path: _published
+          name: website-package
+          path: .
 
       - name: Login to Azure
         uses: azure/login@v2
@@ -66,9 +73,8 @@ jobs:
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_7E6E95E69456472AA3E85819373A1EB6 }}
 
       - name: Deploy to Azure Web App
-        id: deploy-to-webapp
         uses: azure/webapps-deploy@v3
         with:
-          app-name: 'FF'
-          slot-name: 'Production'
-          package: '_published'
+          app-name: FF
+          slot-name: Production
+          package: site.zip
