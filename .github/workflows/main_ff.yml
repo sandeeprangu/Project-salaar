@@ -1,5 +1,5 @@
 
-name: Build and deploy ASP app to Azure Web App - FF
+name: Deploy portfolio to Azure Web App - FF
 
 on:
   push:
@@ -18,81 +18,36 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v2
-
-      - name: Setup NuGet
-        uses: NuGet/setup-nuget@v2
-
-      - name: Find solution or project file
-        id: project
+      - name: Verify website files
         shell: pwsh
         run: |
-          $sln = Get-ChildItem -Path $env:GITHUB_WORKSPACE `
-            -Recurse -File -Filter "*.sln" |
-            Select-Object -First 1
+          $required = @(
+            "index.html",
+            "web.config",
+            "assets"
+          )
 
-          if ($sln) {
-            $file = $sln.FullName
-            $type = "solution"
-          }
-          else {
-            $csproj = Get-ChildItem -Path $env:GITHUB_WORKSPACE `
-              -Recurse -File -Filter "*.csproj" |
-              Select-Object -First 1
-
-            if (-not $csproj) {
-              throw "No .sln or .csproj file found. Check your repository contents."
+          foreach ($item in $required) {
+            if (-not (Test-Path $item)) {
+              throw "Required website file or folder not found: $item"
             }
-
-            $file = $csproj.FullName
-            $type = "project"
           }
 
-          Write-Host "Found $type file: $file"
-          "file=$file" >> $env:GITHUB_OUTPUT
-          "type=$type" >> $env:GITHUB_OUTPUT
+          Write-Host "Website files verified successfully."
 
-      - name: Restore NuGet packages
+      - name: Create deployment package
         shell: pwsh
         run: |
-          $file = "${{ steps.project.outputs.file }}"
-          nuget restore "$file"
+          Compress-Archive `
+            -Path index.html, web.config, assets `
+            -DestinationPath site.zip `
+            -Force
 
-          if ($LASTEXITCODE -ne 0) {
-            throw "NuGet package restore failed."
-          }
-
-      - name: Build and publish application
-        shell: pwsh
-        run: |
-          $file = "${{ steps.project.outputs.file }}"
-          $publishDir = "$env:GITHUB_WORKSPACE\_published"
-
-          New-Item -ItemType Directory -Path $publishDir -Force | Out-Null
-
-          msbuild "$file" `
-            /nologo `
-            /verbosity:minimal `
-            /t:Build `
-            /p:Configuration=Release `
-            /p:DeployOnBuild=true `
-            /p:WebPublishMethod=FileSystem `
-            /p:PublishUrl="$publishDir"
-
-          if ($LASTEXITCODE -ne 0) {
-            throw "MSBuild failed. Check the build output."
-          }
-
-          if (-not (Get-ChildItem $publishDir -Force)) {
-            throw "Publish directory is empty. Check the project publish settings."
-          }
-
-      - name: Upload published application
+      - name: Upload website artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ASP-app
-          path: _published/
+          name: website-package
+          path: site.zip
           if-no-files-found: error
 
   deploy:
@@ -104,11 +59,11 @@ jobs:
       id-token: write
 
     steps:
-      - name: Download published application
+      - name: Download website artifact
         uses: actions/download-artifact@v4
         with:
-          name: ASP-app
-          path: _published
+          name: website-package
+          path: .
 
       - name: Login to Azure
         uses: azure/login@v2
@@ -122,4 +77,4 @@ jobs:
         with:
           app-name: FF
           slot-name: Production
-          package: _published/
+          package: site.zip
